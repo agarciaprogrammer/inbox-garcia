@@ -32,6 +32,7 @@ export default function TimelinePage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [isDragging, setIsDragging] = useState(false)
   const [composerHeight, setComposerHeight] = useState(140)
+  const [keyboardInset, setKeyboardInset] = useState(0)
   const composerRef = useRef<HTMLElement>(null)
   
   // File upload progress states
@@ -105,21 +106,71 @@ export default function TimelinePage() {
     const composer = composerRef.current
     if (!composer) return
 
+    let animationFrame = 0
+
+    const isTextInputFocused = () => {
+      const activeElement = document.activeElement
+      return activeElement instanceof HTMLInputElement ||
+        activeElement instanceof HTMLTextAreaElement ||
+        activeElement instanceof HTMLSelectElement
+    }
+
     const updateComposerHeight = () => {
+      if (animationFrame) {
+        cancelAnimationFrame(animationFrame)
+      }
+
+      animationFrame = requestAnimationFrame(() => {
+        const visualViewport = window.visualViewport
+        const nextKeyboardInset = visualViewport && isTextInputFocused()
+          ? Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop)
+          : 0
+
+        setKeyboardInset(Math.round(nextKeyboardInset))
+        setComposerHeight(Math.ceil(composer.getBoundingClientRect().height))
+      })
+    }
+
+    const updateComposerHeightNow = () => {
       setComposerHeight(Math.ceil(composer.getBoundingClientRect().height))
     }
 
-    updateComposerHeight()
+    updateComposerHeightNow()
 
     if (typeof ResizeObserver === 'undefined') {
       window.addEventListener('resize', updateComposerHeight)
-      return () => window.removeEventListener('resize', updateComposerHeight)
+      window.visualViewport?.addEventListener('resize', updateComposerHeight)
+      window.visualViewport?.addEventListener('scroll', updateComposerHeight)
+      window.addEventListener('focusin', updateComposerHeight)
+      window.addEventListener('focusout', updateComposerHeight)
+
+      return () => {
+        if (animationFrame) cancelAnimationFrame(animationFrame)
+        window.removeEventListener('resize', updateComposerHeight)
+        window.visualViewport?.removeEventListener('resize', updateComposerHeight)
+        window.visualViewport?.removeEventListener('scroll', updateComposerHeight)
+        window.removeEventListener('focusin', updateComposerHeight)
+        window.removeEventListener('focusout', updateComposerHeight)
+      }
     }
 
     const resizeObserver = new ResizeObserver(updateComposerHeight)
     resizeObserver.observe(composer)
+    window.visualViewport?.addEventListener('resize', updateComposerHeight)
+    window.visualViewport?.addEventListener('scroll', updateComposerHeight)
+    window.addEventListener('resize', updateComposerHeight)
+    window.addEventListener('focusin', updateComposerHeight)
+    window.addEventListener('focusout', updateComposerHeight)
 
-    return () => resizeObserver.disconnect()
+    return () => {
+      if (animationFrame) cancelAnimationFrame(animationFrame)
+      resizeObserver.disconnect()
+      window.visualViewport?.removeEventListener('resize', updateComposerHeight)
+      window.visualViewport?.removeEventListener('scroll', updateComposerHeight)
+      window.removeEventListener('resize', updateComposerHeight)
+      window.removeEventListener('focusin', updateComposerHeight)
+      window.removeEventListener('focusout', updateComposerHeight)
+    }
   }, [])
 
   // Centralized File Upload logic (used by CaptureBar and Drag-and-Drop)
@@ -297,7 +348,8 @@ export default function TimelinePage() {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className="relative h-screen flex flex-col bg-zinc-950 text-zinc-50 overflow-hidden select-none"
+      className="fixed inset-0 flex h-dvh min-h-dvh flex-col overflow-hidden bg-zinc-950 text-zinc-50 select-none"
+      style={{ height: '100dvh', minHeight: '100dvh' }}
     >
       {/* Decorative background glows */}
       <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] rounded-full bg-violet-600/5 blur-[100px] pointer-events-none" />
@@ -319,7 +371,7 @@ export default function TimelinePage() {
       )}
 
       {/* Sticky Header */}
-      <header className="sticky top-0 z-40 shrink-0 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-900 px-4 py-3.5 shadow-sm">
+      <header className="relative z-40 shrink-0 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-900 px-4 py-3.5 shadow-sm">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-violet-500 to-indigo-500 flex items-center justify-center shadow-lg">
@@ -360,7 +412,7 @@ export default function TimelinePage() {
       </header>
 
       {/* Global Realtime Search Bar */}
-      <section className="w-full max-w-3xl mx-auto px-4 pt-4 shrink-0">
+      <section className="relative z-30 w-full max-w-3xl mx-auto px-4 pt-4 shrink-0">
         <div className="relative">
           <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-500">
             <Search className="h-4 w-4" />
@@ -388,10 +440,11 @@ export default function TimelinePage() {
 
       {/* Timeline List Scroll Area */}
       <section 
-        className="relative z-10 flex-1 min-h-0 overflow-y-auto overscroll-contain"
+        className="relative z-10 flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y"
         style={{
-          paddingBottom: `${composerHeight + 16}px`,
-          scrollPaddingBottom: `${composerHeight + 16}px`,
+          paddingBottom: `calc(${composerHeight + keyboardInset + 16}px + env(safe-area-inset-bottom))`,
+          scrollPaddingBottom: `calc(${composerHeight + keyboardInset + 16}px + env(safe-area-inset-bottom))`,
+          WebkitOverflowScrolling: 'touch',
         }}
       >
         <TimelineList 
@@ -408,6 +461,7 @@ export default function TimelinePage() {
       <section
         ref={composerRef}
         className="fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-zinc-950 via-zinc-950/95 to-transparent pt-4 pb-[env(safe-area-inset-bottom)]"
+        style={{ bottom: `${keyboardInset}px` }}
       >
         {uploading && uploadProgress && (
           <div className="absolute top-[-30px] left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-violet-400 flex items-center gap-2 shadow-lg animate-pulse z-40">

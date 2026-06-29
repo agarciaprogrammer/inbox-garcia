@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react'
 import { formatBytes, formatRelativeTime } from '@/lib/utils'
+import NoteContent from './note-content'
 import { 
   FileText, 
   Globe, 
@@ -208,9 +209,7 @@ export default function ItemCard({ item, signedUrl, onDelete, onToggleFavorite, 
               </div>
             </div>
           ) : (
-            <p className="text-[13px] text-zinc-200 whitespace-pre-wrap mt-1 break-words leading-relaxed select-text">
-              {item.text}
-            </p>
+            <NoteContent text={item.text} />
           )}
         </div>
       </div>

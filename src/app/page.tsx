@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import CaptureBar from '@/components/timeline/capture-bar'
 import TimelineList from '@/components/timeline/timeline-list'
+import { stripSecretValues } from '@/lib/note-markup'
 import { LogOut, User, Loader2, Sparkles, Search, Upload } from 'lucide-react'
 
 interface Item {
@@ -282,7 +283,8 @@ export default function TimelinePage() {
     const query = searchQuery.toLowerCase().trim()
     if (!query) return true
 
-    const matchesText = item.text?.toLowerCase().includes(query) || false
+    const searchableText = item.type === 'note' ? stripSecretValues(item.text) : item.text
+    const matchesText = searchableText?.toLowerCase().includes(query) || false
     const matchesTitle = item.title?.toLowerCase().includes(query) || false
     const matchesUrl = item.url?.toLowerCase().includes(query) || false
     const matchesDesc = item.description?.toLowerCase().includes(query) || false

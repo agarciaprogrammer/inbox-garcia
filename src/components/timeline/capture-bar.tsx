@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { isValidUrl, normalizeUrl } from '@/lib/utils'
-import { Paperclip, Send, Loader2 } from 'lucide-react'
+import { LockKeyhole, Paperclip, Send, Loader2 } from 'lucide-react'
 
 interface CaptureBarProps {
   onItemCreated: () => void
@@ -13,8 +13,13 @@ interface CaptureBarProps {
 export default function CaptureBar({ onItemCreated, onUploadFile }: CaptureBarProps) {
   const [text, setText] = useState('')
   const [loading, setLoading] = useState(false)
+  const [secretPopoverOpen, setSecretPopoverOpen] = useState(false)
+  const [secretLabel, setSecretLabel] = useState('')
+  const [secretValue, setSecretValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const secretValueRef = useRef<HTMLInputElement>(null)
+  const selectionRef = useRef({ start: 0, end: 0 })
   const supabase = createClient()
 
   // Auto-grow textarea height
@@ -24,6 +29,21 @@ export default function CaptureBar({ onItemCreated, onUploadFile }: CaptureBarPr
     textarea.style.height = 'auto'
     textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`
   }, [text])
+
+  useEffect(() => {
+    if (!secretPopoverOpen) return
+    requestAnimationFrame(() => secretValueRef.current?.focus())
+  }, [secretPopoverOpen])
+
+  const rememberSelection = () => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+
+    selectionRef.current = {
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd,
+    }
+  }
 
   // Handle standard text submission (or URL with OG preview)
   const handleSend = async () => {
@@ -120,9 +140,54 @@ export default function CaptureBar({ onItemCreated, onUploadFile }: CaptureBarPr
 
   // Textarea key listener (Enter to Send, Shift+Enter for new line)
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    rememberSelection()
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
+    }
+  }
+
+  const toggleSecretPopover = () => {
+    rememberSelection()
+    setSecretPopoverOpen((open) => !open)
+  }
+
+  const insertSecret = () => {
+    const value = secretValue.trim()
+    if (!value) return
+
+    const label = secretLabel.trim()
+    const secretMarkup = label ? `${label}\n\n{{secret:${value}}}` : `{{secret:${value}}}`
+    const { start, end } = selectionRef.current
+    const nextText = `${text.slice(0, start)}${secretMarkup}${text.slice(end)}`
+    const nextCursor = start + secretMarkup.length
+
+    setText(nextText)
+    setSecretLabel('')
+    setSecretValue('')
+    setSecretPopoverOpen(false)
+
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current
+      if (!textarea) return
+
+      textarea.focus()
+      textarea.setSelectionRange(nextCursor, nextCursor)
+      selectionRef.current = { start: nextCursor, end: nextCursor }
+    })
+  }
+
+  const handleSecretKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      insertSecret()
+    }
+
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      setSecretPopoverOpen(false)
+      textareaRef.current?.focus()
     }
   }
 
@@ -164,6 +229,65 @@ export default function CaptureBar({ onItemCreated, onUploadFile }: CaptureBarPr
             <Paperclip className="h-5 w-5" />
           </button>
 
+          {/* Secret Block Insert */}
+          <div className="relative shrink-0">
+            <button
+              id="insert-secret-button"
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={toggleSecretPopover}
+              disabled={loading}
+              className="flex items-center justify-center p-3 rounded-xl text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60 transition-all disabled:opacity-50 cursor-pointer"
+              title="Insert secret"
+              aria-label="Insert secret"
+              aria-expanded={secretPopoverOpen}
+            >
+              <LockKeyhole className="h-5 w-5" />
+            </button>
+
+            {secretPopoverOpen && (
+              <div className="absolute bottom-full left-0 z-50 mb-3 w-[min(18rem,calc(100vw-2rem))] rounded-2xl border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">
+                <div className="space-y-2">
+                  <label className="block">
+                    <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Label</span>
+                    <input
+                      id="secret-label-input"
+                      type="text"
+                      value={secretLabel}
+                      onChange={(e) => setSecretLabel(e.target.value)}
+                      onKeyDown={handleSecretKeyDown}
+                      placeholder="Optional"
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-900/70 px-3 py-2 text-xs text-white placeholder-zinc-600 outline-none transition-all focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/10"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Secret value</span>
+                    <input
+                      id="secret-value-input"
+                      ref={secretValueRef}
+                      type="password"
+                      value={secretValue}
+                      onChange={(e) => setSecretValue(e.target.value)}
+                      onKeyDown={handleSecretKeyDown}
+                      placeholder="Paste secret"
+                      autoComplete="off"
+                      className="w-full rounded-xl border border-zinc-800 bg-zinc-900/70 px-3 py-2 text-xs text-white placeholder-zinc-600 outline-none transition-all focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/10"
+                    />
+                  </label>
+                  <button
+                    id="insert-secret-submit"
+                    type="button"
+                    onClick={insertSecret}
+                    disabled={!secretValue.trim()}
+                    className="mt-1 flex w-full items-center justify-center rounded-xl bg-violet-600 px-3 py-2 text-xs font-semibold text-white transition-all hover:bg-violet-500 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500 cursor-pointer"
+                  >
+                    Insert
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Growing Input Textarea */}
           <textarea
             id="chat-textarea"
@@ -172,6 +296,9 @@ export default function CaptureBar({ onItemCreated, onUploadFile }: CaptureBarPr
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
+            onClick={rememberSelection}
+            onKeyUp={rememberSelection}
+            onSelect={rememberSelection}
             onPaste={handlePaste}
             disabled={loading}
             placeholder="Type a note, paste a link, image or file..."

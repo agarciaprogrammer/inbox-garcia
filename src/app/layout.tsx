@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Inbox — External Memory",
+  title: "Inbox - External Memory",
   description: "A fast, minimal, and frictionless personal inbox to capture notes, URLs, images, and files in seconds.",
 };
 

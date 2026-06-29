@@ -1,36 +1,330 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Project Overview
 
-## Getting Started
+## Philosophy
 
-First, run the development server:
+Este proyecto **no es una aplicación de notas**.
+Es una **memoria externa** o **inbox personal** donde todo puede capturarse en segundos, sin fricción.
+El flujo es extremadamente simple:
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+Quiero recordar algo
+        ↓
+Lo guardo
+        ↓
+Fin
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+La organización ocurre **después**, nunca antes.
+El objetivo es reemplazar el comportamiento que mucha gente ya tiene con WhatsApp: abrir un chat personal, pegar algo y seguir con su vida.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# Design Principles
 
-## Learn More
+## Capture First
 
-To learn more about Next.js, take a look at the following resources:
+El usuario nunca debería tener que decidir:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+* Categoría
+* Etiquetas
+* Prioridad
+* Color
+* Carpeta
+* Proyecto
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Cada decisión adicional aumenta la fricción y hace que el sistema deje de usarse.
 
-## Deploy on Vercel
+Guardar información debe tomar uno o dos clics como máximo.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Chat-based Interface
+
+La pantalla principal será un chat cronológico.
+
+```
+🔍 Search...
+
+──────────────────────────
+
+🖼 foto.png          15:22
+
+──────────────────────────
+
+🔗 mercadolibre.com  15:01
+
+──────────────────────────
+
+📄 terraform.tf      14:35
+
+──────────────────────────
+
+📝 Acordarme de...
+
+                    13:50
+```
+
+No existen carpetas ni vistas complejas.
+
+Todo vive en una única línea temporal.
+
+---
+
+# Quick Capture
+
+El botón `+` debe abrir únicamente las acciones necesarias:
+
+* 📷 Cámara
+* 🖼 Imagen
+* 📄 Archivo
+* ✍️ Nota
+
+Nada más.
+
+La aplicación también debe soportar **paste inteligente**.
+
+Al presionar `Ctrl + V` (o pegar desde el teléfono), detecta automáticamente el contenido:
+
+* Texto
+* Imagen
+* Archivo
+* URL
+
+y crea el elemento correspondiente sin pasos intermedios.
+
+---
+
+# Rich Content
+
+## URLs
+
+Al pegar un enlace, la aplicación obtiene automáticamente la información mediante Open Graph.
+
+Ejemplo:
+
+```
+🌐 Mercado Libre
+
+Set de Mate Gadnic
+
+mercadolibre.com.ar
+
+$39.999
+```
+
+Esto hace que el historial sea mucho más visual y fácil de recorrer.
+
+---
+
+## Images
+
+* Thumbnail automático
+* Click para abrir en Lightbox
+
+---
+
+## Files
+
+Mostrar información básica:
+
+```
+📄 kubeconfig-prod.yaml
+
+3 KB
+
+29 Jun 2026
+```
+
+Click para descargar.
+
+---
+
+# Search
+
+La búsqueda es una de las funcionalidades principales.
+
+Debe funcionar sobre absolutamente todo.
+
+Ejemplos:
+
+```
+docker
+```
+
+Devuelve:
+
+* notas
+* archivos
+* links
+
+```
+amazon
+```
+
+Devuelve únicamente contenido relacionado con Amazon.
+
+```
+pdf
+```
+
+Devuelve todos los PDF.
+
+```
+ayer
+```
+
+Devuelve todo lo agregado ese día.
+
+---
+
+# Filters
+
+No existen carpetas.
+
+Sólo filtros rápidos:
+
+* All
+* Notes
+* Links
+* Photos
+* Videos
+* Files
+* Favorites
+
+Muy similar a Telegram.
+
+---
+
+# Adaptive Cards
+
+Cada tipo de contenido tiene su propia representación visual.
+
+**Link**
+
+```
+🌐
+
+Mercado Libre
+
+Set de Mate Gadnic
+```
+
+**Nota**
+
+```
+📝
+
+Comprar filtro Hario
+```
+
+**Imagen**
+
+```
+📷
+
+Thumbnail
+```
+
+**PDF**
+
+```
+📄
+
+Factura.pdf
+```
+
+Esto hace que el historial sea mucho más agradable de recorrer que una lista uniforme.
+
+---
+
+# Data Model
+
+Una única tabla es suficiente.
+
+```sql
+items
+-----
+
+id
+user_id
+type
+text
+title
+url
+storage_path
+mime
+created_at
+favorite
+```
+
+Dependiendo del tipo de elemento se utilizan distintos campos.
+
+No es necesario dividir la información en múltiples tablas.
+
+---
+
+# Storage
+
+Los archivos binarios se almacenan en Supabase Storage.
+
+```
+uploads/
+    2026/
+        06/
+            uuid.png
+            uuid.pdf
+```
+
+La base de datos únicamente guarda la ruta del archivo.
+
+---
+
+# Authentication
+
+Utilizar Supabase Auth con Google.
+
+Tabla mínima de perfiles:
+
+```sql
+profiles
+
+id
+email
+role
+```
+
+Ejemplo:
+
+| Email                                   | Role   |
+| --------------------------------------- | ------ |
+| [agus@gmail.com](mailto:agus@gmail.com) | admin  |
+| [test@gmail.com](mailto:test@gmail.com) | tester |
+
+Esto reduce considerablemente la complejidad del backend.
+
+---
+
+# Progressive Web App
+
+La aplicación debe funcionar como una PWA.
+
+En dispositivos móviles el flujo ideal es:
+
+1. Agregar a la pantalla principal.
+2. Abrir desde el ícono.
+3. Guardar contenido.
+4. Cerrar.
+
+Debe sentirse como una aplicación nativa, no como un sitio web.
+
+---
+
+# Core Principle
+
+La decisión más importante del proyecto es su enfoque.
+
+No debe diseñarse como un gestor de archivos.
+
+Debe diseñarse como una **memoria externa**.
+
+El éxito del producto no dependerá de la cantidad de funcionalidades, sino de que capturar cualquier información sea tan rápido y natural que el usuario termine utilizándolo durante años.

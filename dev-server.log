@@ -1,0 +1,16 @@
+
+> inbox-garcia@0.1.0 dev
+> next dev --port 3000
+
+▲ Next.js 16.2.9 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://10.20.242.16:3000
+- Environments: .env.local
+✓ Ready in 337ms
+Creating turbopack project {
+  dir: 'C:\\Users\\agustin.garcia\\Downloads\\Proyectos Github\\inbox-garcia',
+  testMode: true
+}
+
+ GET /login 200 in 421ms (next.js: 237ms, proxy.ts: 5ms, application-code: 179ms)
+[?25h

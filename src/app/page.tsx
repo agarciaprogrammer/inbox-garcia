@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import CaptureBar from '@/components/timeline/capture-bar'
@@ -30,6 +30,8 @@ export default function TimelinePage() {
   const [signingOut, setSigningOut] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [isDragging, setIsDragging] = useState(false)
+  const [composerHeight, setComposerHeight] = useState(140)
+  const composerRef = useRef<HTMLElement>(null)
   
   // File upload progress states
   const [uploading, setUploading] = useState(false)
@@ -96,6 +98,27 @@ export default function TimelinePage() {
 
   useEffect(() => {
     fetchTimeline()
+  }, [])
+
+  useEffect(() => {
+    const composer = composerRef.current
+    if (!composer) return
+
+    const updateComposerHeight = () => {
+      setComposerHeight(Math.ceil(composer.getBoundingClientRect().height))
+    }
+
+    updateComposerHeight()
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateComposerHeight)
+      return () => window.removeEventListener('resize', updateComposerHeight)
+    }
+
+    const resizeObserver = new ResizeObserver(updateComposerHeight)
+    resizeObserver.observe(composer)
+
+    return () => resizeObserver.disconnect()
   }, [])
 
   // Centralized File Upload logic (used by CaptureBar and Drag-and-Drop)
@@ -272,7 +295,7 @@ export default function TimelinePage() {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className="relative min-h-screen flex flex-col bg-zinc-950 text-zinc-50 overflow-x-hidden select-none"
+      className="relative h-screen flex flex-col bg-zinc-950 text-zinc-50 overflow-hidden select-none"
     >
       {/* Decorative background glows */}
       <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] rounded-full bg-violet-600/5 blur-[100px] pointer-events-none" />
@@ -294,7 +317,7 @@ export default function TimelinePage() {
       )}
 
       {/* Sticky Header */}
-      <header className="sticky top-0 z-40 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-900 px-4 py-3.5 shadow-sm">
+      <header className="sticky top-0 z-40 shrink-0 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-900 px-4 py-3.5 shadow-sm">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-violet-500 to-indigo-500 flex items-center justify-center shadow-lg">
@@ -362,7 +385,13 @@ export default function TimelinePage() {
       </section>
 
       {/* Timeline List Scroll Area */}
-      <section className="flex-1 flex flex-col min-h-0">
+      <section 
+        className="relative z-10 flex-1 min-h-0 overflow-y-auto overscroll-contain"
+        style={{
+          paddingBottom: `${composerHeight + 16}px`,
+          scrollPaddingBottom: `${composerHeight + 16}px`,
+        }}
+      >
         <TimelineList 
           items={filteredItems} 
           signedUrls={signedUrls} 
@@ -373,8 +402,11 @@ export default function TimelinePage() {
         />
       </section>
 
-      {/* Sticky Bottom Capture Bar */}
-      <section className="sticky bottom-0 z-30 bg-gradient-to-t from-zinc-950 via-zinc-950/95 to-transparent pt-4">
+      {/* Fixed Bottom Capture Bar */}
+      <section
+        ref={composerRef}
+        className="fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-zinc-950 via-zinc-950/95 to-transparent pt-4 pb-[env(safe-area-inset-bottom)]"
+      >
         {uploading && uploadProgress && (
           <div className="absolute top-[-30px] left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-violet-400 flex items-center gap-2 shadow-lg animate-pulse z-40">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />

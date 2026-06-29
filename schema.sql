@@ -31,6 +31,8 @@ create table if not exists public.items (
   storage_path text,
   mime text,
   size bigint,
+  description text,
+  og_image text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   favorite boolean not null default false
 );
@@ -65,3 +67,7 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- Migration for MVP 2 (adds columns to existing tables safely)
+alter table public.items add column if not exists description text;
+alter table public.items add column if not exists og_image text;

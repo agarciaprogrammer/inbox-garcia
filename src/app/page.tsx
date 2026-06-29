@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import CaptureBar from '@/components/timeline/capture-bar'
 import TimelineList from '@/components/timeline/timeline-list'
-import { LogOut, User, Loader2, Sparkles } from 'lucide-react'
+import { LogOut, User, Loader2, Sparkles, Search, Upload } from 'lucide-react'
 
 interface Item {
   id: string
@@ -17,6 +17,9 @@ interface Item {
   mime?: string
   size?: number
   created_at: string
+  favorite: boolean
+  description?: string
+  og_image?: string
 }
 
 export default function TimelinePage() {
@@ -25,14 +28,20 @@ export default function TimelinePage() {
   const [loading, setLoading] = useState(true)
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [signingOut, setSigningOut] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [isDragging, setIsDragging] = useState(false)
   
+  // File upload progress states
+  const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null)
+
   const router = useRouter()
   const supabase = createClient()
 
   const fetchTimeline = async (showLoading = true) => {
     if (showLoading) setLoading(true)
     try {
-      // 1. Fetch current user to display email
+      // 1. Fetch current user
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         setUserEmail(user.email || null)
@@ -89,6 +98,124 @@ export default function TimelinePage() {
     fetchTimeline()
   }, [])
 
+  // Centralized File Upload logic (used by CaptureBar and Drag-and-Drop)
+  const uploadFile = async (file: File) => {
+    setUploading(true)
+    setUploadProgress(`Uploading ${file.name}...`)
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not authenticated')
+
+      const userId = user.id
+      const now = new Date()
+      const year = now.getFullYear()
+      const month = (now.getMonth() + 1).toString().padStart(2, '0')
+      const fileExt = file.name.split('.').pop() || ''
+      const uniqueId = crypto.randomUUID()
+      const storagePath = `${userId}/${year}/${month}/${uniqueId}.${fileExt}`
+
+      // Upload file to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('inbox-files')
+        .upload(storagePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        })
+
+      if (uploadError) throw uploadError
+
+      const isImage = file.type.startsWith('image/')
+      const itemType = isImage ? 'image' : 'file'
+
+      // Insert item metadata into DB
+      const { error: dbError } = await supabase.from('items').insert({
+        user_id: userId,
+        type: itemType,
+        text: file.name,
+        title: file.name,
+        storage_path: storagePath,
+        mime: file.type,
+        size: file.size,
+      })
+
+      if (dbError) throw dbError
+      await fetchTimeline(false)
+    } catch (err: any) {
+      console.error('Upload failed:', err)
+      alert(`Upload failed: ${err?.message || err}`)
+    } finally {
+      setUploading(false)
+      setUploadProgress(null)
+    }
+  }
+
+  // Delete Item logic (removes from Supabase Storage and DB)
+  const deleteItem = async (id: string, storagePath?: string) => {
+    try {
+      // 1. Remove from Storage first if file path exists
+      if (storagePath) {
+        const { error: storageError } = await supabase.storage
+          .from('inbox-files')
+          .remove([storagePath])
+        
+        if (storageError) {
+          console.error('Error removing file from storage:', storageError)
+        }
+      }
+
+      // 2. Delete from DB
+      const { error } = await supabase
+        .from('items')
+        .delete()
+        .eq('id', id)
+
+      if (error) throw error
+
+      // Optimistic UI state update
+      setItems(prev => prev.filter(item => item.id !== id))
+    } catch (err: any) {
+      console.error('Deletion failed:', err)
+      alert(`Failed to delete item: ${err?.message || err}`)
+    }
+  }
+
+  // Toggle Favorite
+  const toggleFavorite = async (id: string, currentFav: boolean) => {
+    try {
+      // Optimistic UI update
+      setItems(prev => prev.map(item => item.id === id ? { ...item, favorite: !currentFav } : item))
+
+      const { error } = await supabase
+        .from('items')
+        .update({ favorite: !currentFav })
+        .eq('id', id)
+
+      if (error) throw error
+    } catch (err) {
+      console.error('Toggle favorite failed:', err)
+      // Revert optimistic update
+      setItems(prev => prev.map(item => item.id === id ? { ...item, favorite: currentFav } : item))
+    }
+  }
+
+  // Update Note Text
+  const updateNoteText = async (id: string, newText: string) => {
+    try {
+      // Optimistic UI update
+      setItems(prev => prev.map(item => item.id === id ? { ...item, text: newText } : item))
+
+      const { error } = await supabase
+        .from('items')
+        .update({ text: newText })
+        .eq('id', id)
+
+      if (error) throw error
+    } catch (err) {
+      console.error('Updating note failed:', err)
+      await fetchTimeline(false) // revert by fetching fresh data
+    }
+  }
+
   const handleSignOut = async () => {
     setSigningOut(true)
     try {
@@ -101,11 +228,70 @@ export default function TimelinePage() {
     }
   }
 
+  // Drag & Drop Viewport Event Handlers
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDragging(true)
+    }
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const filesList = Array.from(e.dataTransfer.files)
+      // Upload files sequentially
+      for (const file of filesList) {
+        await uploadFile(file)
+      }
+    }
+  }
+
+  // Filter items in real time
+  const filteredItems = items.filter(item => {
+    const query = searchQuery.toLowerCase().trim()
+    if (!query) return true
+
+    const matchesText = item.text?.toLowerCase().includes(query) || false
+    const matchesTitle = item.title?.toLowerCase().includes(query) || false
+    const matchesUrl = item.url?.toLowerCase().includes(query) || false
+    const matchesDesc = item.description?.toLowerCase().includes(query) || false
+
+    return matchesText || matchesTitle || matchesUrl || matchesDesc
+  })
+
   return (
-    <main className="relative min-h-screen flex flex-col bg-zinc-950 text-zinc-50 overflow-x-hidden">
+    <main 
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className="relative min-h-screen flex flex-col bg-zinc-950 text-zinc-50 overflow-x-hidden select-none"
+    >
       {/* Decorative background glows */}
       <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] rounded-full bg-violet-600/5 blur-[100px] pointer-events-none" />
       <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-indigo-600/5 blur-[100px] pointer-events-none" />
+
+      {/* Drag & Drop Visual Overlay Overlay */}
+      {isDragging && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-zinc-950/85 border-4 border-dashed border-violet-500/35 backdrop-blur-sm p-4 pointer-events-none">
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-violet-400 shadow-2xl">
+              <Upload className="h-7 w-7 animate-bounce" />
+            </div>
+            <h2 className="text-xl font-bold text-white">Drop files to upload</h2>
+            <p className="text-xs text-zinc-400 max-w-xs leading-relaxed">
+              Release to instantly add files or images to your personal inbox timeline.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Sticky Header */}
       <header className="sticky top-0 z-40 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-900 px-4 py-3.5 shadow-sm">
@@ -148,18 +334,57 @@ export default function TimelinePage() {
         </div>
       </header>
 
+      {/* Global Realtime Search Bar */}
+      <section className="w-full max-w-3xl mx-auto px-4 pt-4 shrink-0">
+        <div className="relative">
+          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-500">
+            <Search className="h-4 w-4" />
+          </div>
+          <input
+            id="search-input"
+            type="text"
+            placeholder="Search notes, links, or filenames..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="block w-full pl-10 pr-10 py-2.5 bg-zinc-900/40 border border-zinc-900 focus:border-zinc-800 focus:outline-none focus:ring-2 focus:ring-violet-500/10 rounded-2xl text-xs text-white placeholder-zinc-500 transition-all"
+          />
+          {searchQuery && (
+            <button 
+              id="clear-search-button"
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute inset-y-0 right-0 pr-3 flex items-center text-zinc-500 hover:text-zinc-300 text-xs font-semibold cursor-pointer"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </section>
+
       {/* Timeline List Scroll Area */}
       <section className="flex-1 flex flex-col min-h-0">
         <TimelineList 
-          items={items} 
+          items={filteredItems} 
           signedUrls={signedUrls} 
-          loading={loading} 
+          loading={loading}
+          onDelete={deleteItem}
+          onToggleFavorite={toggleFavorite}
+          onEditNote={updateNoteText}
         />
       </section>
 
       {/* Sticky Bottom Capture Bar */}
       <section className="sticky bottom-0 z-30 bg-gradient-to-t from-zinc-950 via-zinc-950/95 to-transparent pt-4">
-        <CaptureBar onItemCreated={() => fetchTimeline(false)} />
+        {uploading && uploadProgress && (
+          <div className="absolute top-[-30px] left-1/2 -translate-x-1/2 px-4 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-violet-400 flex items-center gap-2 shadow-lg animate-pulse z-40">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <span>{uploadProgress}</span>
+          </div>
+        )}
+        <CaptureBar 
+          onItemCreated={() => fetchTimeline(false)} 
+          onUploadFile={uploadFile}
+        />
       </section>
     </main>
   )
